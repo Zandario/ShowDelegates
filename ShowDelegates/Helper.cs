@@ -1,6 +1,7 @@
 ﻿using Elements.Core;
 using FrooxEngine;
 using FrooxEngine.UIX;
+using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -56,13 +57,14 @@ internal class MethodArgs : IEquatable<MethodArgs>
     }
 }
 
-
 internal class Helper
 {
     // Generates a lookup table for all the sync methods in the assembly. The keys of the table
     // are the parameter types for each method, and the values are the delegates that can be
     // used to invoke those methods.
-    public static Dictionary<MethodArgs, Type> GenerateArgumentLookup(IEnumerable<Delegate> delegates)
+    public static Dictionary<MethodArgs, Type> GenerateArgumentLookup(
+        IEnumerable<Delegate> delegates
+    )
     {
         var argumentLookup = new Dictionary<MethodArgs, Type>();
 
@@ -74,22 +76,36 @@ internal class Helper
             // If the method returns void, we need to return an Action<> that matches its parameters.
             if (methodInfo.ReturnType == typeof(void))
             {
-                argumentLookup[new MethodArgs(parameterTypes)] = typeof(Action<>).MakeGenericType(parameterTypes);
+                argumentLookup[new MethodArgs(parameterTypes)] = typeof(Action<>).MakeGenericType(
+                    parameterTypes
+                );
             }
             // Otherwise, we need to return a Func<,> that matches its parameters and return type.
             else
             {
-                argumentLookup[new MethodArgs(parameterTypes.Concat(new[] { methodInfo.ReturnType }).ToArray())] = typeof(Func<,>).MakeGenericType(parameterTypes.Concat(new[] { methodInfo.ReturnType }).ToArray());
+                argumentLookup[
+                    new MethodArgs(parameterTypes.Concat(new[] { methodInfo.ReturnType }).ToArray())
+                ] = typeof(Func<,>).MakeGenericType(
+                    parameterTypes.Concat(new[] { methodInfo.ReturnType }).ToArray()
+                );
             }
         }
 
         return argumentLookup;
     }
 
-    public static Type ClassifyDelegate(MethodInfo methodInfo, Dictionary<MethodArgs, Type> argumentLookup)
+    public static Type ClassifyDelegate(
+        MethodInfo methodInfo,
+        Dictionary<MethodArgs, Type> argumentLookup
+    )
     {
         // If the method is a known delegate type, return that type.
-        if (argumentLookup.TryGetValue(new MethodArgs(methodInfo.GetParameters().Select(p => p.ParameterType).ToArray()), out var type))
+        if (
+            argumentLookup.TryGetValue(
+                new MethodArgs(methodInfo.GetParameters().Select(p => p.ParameterType).ToArray()),
+                out var type
+            )
+        )
         {
             return type;
         }
@@ -97,9 +113,11 @@ internal class Helper
         // If the method has three parameters, and the first two are IButton and ButtonEventData,
         // return ButtonEventHandler<T>, where T is the third parameter type.
         var parameters = methodInfo.GetParameters();
-        if (parameters.Length == 3 &&
-            parameters[0].ParameterType == typeof(IButton) &&
-            parameters[1].ParameterType == typeof(ButtonEventData))
+        if (
+            parameters.Length == 3
+            && parameters[0].ParameterType == typeof(IButton)
+            && parameters[1].ParameterType == typeof(ButtonEventData)
+        )
         {
             return typeof(ButtonEventHandler<>).MakeGenericType(parameters[2].ParameterType);
         }
@@ -116,6 +134,57 @@ internal class Helper
         // Return the appropriate delegate type based on the method's return type.
         return methodInfo.ReturnType == typeof(void)
             ? Expression.GetActionType(parameterTypes)
-            : Expression.GetFuncType(parameterTypes.Concat(new[] { methodInfo.ReturnType }).ToArray());
+            : Expression.GetFuncType(
+                parameterTypes.Concat(new[] { methodInfo.ReturnType }).ToArray()
+            );
+    }
+}
+
+public class DelegateInfo
+{
+    private ISyncMember item;
+
+    public MethodInfo Method { get; set; }
+    public System.Type MethodType { get; set; }
+    public Type DelegateType { get; set; }
+    public Type ReturnType { get; }
+    public string NiceReturnType { get; }
+    public string Name { get; }
+    public Type[] Parameters { get; }
+    public bool Static { get; set; }
+
+    public DelegateInfo(MethodInfo info)
+    {
+        Method = info;
+        MethodType = info.GetCustomAttribute<SyncMethod>().MethodType;
+        DelegateType = info.GetType();
+        ReturnType = info.ReturnType;
+        NiceReturnType = ReturnType.GetNiceName().BeautifyName();
+        Name = info.Name;
+        Parameters = info.GetParameters().Select(p => p.ParameterType).ToArray();
+        Static = info.IsStatic;
+    }
+
+    public DelegateInfo(
+        Type delegateType,
+        Type returnType,
+        string niceReturnType,
+        string name,
+        Type[] parameters
+    )
+    {
+        DelegateType = delegateType;
+        ReturnType = returnType;
+        NiceReturnType = niceReturnType;
+        Name = name;
+        Parameters = parameters;
+        Static = false;
+    }
+
+    public DelegateInfo(ISyncMember item)
+    {
+        Name = "Fuck you";
+        this.item = item;
+        return;
     }
 }

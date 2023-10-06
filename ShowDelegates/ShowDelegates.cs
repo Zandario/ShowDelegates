@@ -8,6 +8,7 @@ using FrooxEngine;
 using FrooxEngine.UIX;
 using FrooxEngine.ProtoFlux;
 using Elements.Core;
+using System.Reflection.Emit;
 
 namespace ShowDelegates
 {
@@ -34,10 +35,11 @@ namespace ShowDelegates
         public override void OnEngineInit()
         {
             config = GetConfiguration();
-            Harmony harmony = new Harmony("me.art0007i.ShowDelegates");
+            Harmony harmony = new("me.art0007i.ShowDelegates");
             harmony.PatchAll();
 
         }
+
         private static void GenerateDelegateProxy<T>(UIBuilder ui, string name, T target) where T : class
         {
             LocaleString localeString = name;
@@ -48,6 +50,7 @@ namespace ShowDelegates
             RadiantUI_Constants.SetupLabelDriverColors(colorDriver);
             text.Slot.AttachComponent<DelegateProxySource<T>>(true, null).Delegate.Target = target;
         }
+
         private static void GenerateReferenceProxy(UIBuilder ui, string name, IWorldElement target)
         {
             LocaleString localeString = name + ":";
@@ -59,24 +62,20 @@ namespace ShowDelegates
             text.Slot.AttachComponent<ReferenceProxySource>(true, null).Reference.Target = target;
         }
 
-        private static string funName(string prefix, MethodInfo info)
+        private static string FunName(string prefix, MethodInfo info)
         {
+            // if short names are enabled
             if (config.GetValue(KEY_SHORT_NAMES))
             {
-                string text = string.Join(", ", from p in info.GetParameters()
-                                                select p.ParameterType.GetNiceName() + " " + p.Name);
-                return info.ReturnType.GetNiceName() + " " + info.Name + "(" + text + ")";
+                // get all parameters
+                var parameters = string.Join(", ", info.GetParameters().Select(p => $"{p.ParameterType.GetNiceName()} {p.Name}"));
+                // return a short name
+                return $"{info.ReturnType.GetNiceName()} {info.Name}({parameters})";
             }
-            return string.Concat(new string[]
-            {
-            info.IsStatic ? "Static " : "",
-            prefix,
-            " ",
-            info.ToString().Substring(info.ToString().IndexOf(" ")).Replace("FrooxEngine.", ""),
-            " -> ",
-            info.ReturnType.Name
-            }
-            );
+
+            var staticText = info.IsStatic ? "Static " : "";
+            var nameText = info.ToString().Substring(info.ToString().IndexOf(" ")).Replace("FrooxEngine.", "");
+            return $"{staticText}{prefix} {nameText} -> {info.ReturnType.Name}";
         }
 
         [HarmonyPatch(typeof(WorkerInitializer), nameof(WorkerInitializer.Initialize), new Type[] { typeof(Type) })]
@@ -102,15 +101,8 @@ namespace ShowDelegates
         {
             public static void Prefix(IButton button, ButtonEventData eventData, ref Delegate target)
             {
-                try
-                {
-                    // this could throw in many ways....
-                    var delegateType = Helper.GetFuncOrAction(target.Method);
-                    target = target.Method.CreateDelegate(delegateType, target.Target);
-                }
-                catch(Exception)
-                {
-                }
+                var delegateType = Helper.GetFuncOrAction(target.Method);
+                target = target.Method.CreateDelegate(delegateType, target.Target);
             }
         }
 
@@ -140,13 +132,16 @@ namespace ShowDelegates
                         hidden.Add(syncMember);
                     }
                 }
+
                 if (config.GetValue(KEY_SHOW_HIDDEN)) {
                     foreach (var item in hidden)
                     {
                         GenerateReferenceProxy(ui, worker.GetSyncMemberName(item), item);
                     }
                 }
-                if (!config.GetValue(KEY_SHOW_DELEGATES)) return false;
+
+                if (!config.GetValue(KEY_SHOW_DELEGATES))
+                    return false;
 
                 if (worker.SyncMethodCount > 0)
                 {
@@ -187,7 +182,7 @@ namespace ShowDelegates
                             if (delegateType == null)
                             {
                                 Error("Unmapped type. Please report this message to the mod author: Could not identify " + info.method + " on type " + info.method.DeclaringType);
-                                ui.Text("<color=orange>" + funName("<i>unknown</i>", info.method), true, new Alignment?(Alignment.MiddleLeft));
+                                ui.Text("<color=orange>" + FunName("<i>unknown</i>", info.method), true, new Alignment?(Alignment.MiddleLeft));
                                 continue;
                             }
                         }
@@ -197,7 +192,7 @@ namespace ShowDelegates
                         delegateFunc.MakeGenericMethod(delegateType).Invoke(null, new object[]
                         {
                             ui,
-                            funName(delegateType.ToString(), info.method),
+                            FunName(delegateType.ToString(), info.method),
                             method
                         });
                     }

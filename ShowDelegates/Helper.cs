@@ -1,5 +1,6 @@
 ﻿using Elements.Core;
 using FrooxEngine;
+using FrooxEngine.UIX;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -10,130 +11,111 @@ using System.Threading.Tasks;
 
 namespace ShowDelegates;
 
-public struct MethodArgs
+internal class MethodArgs : IEquatable<MethodArgs>
 {
-    public Type returnType;
-    public Type[] argumentTypes;
+    private readonly Type[] _types;
 
-    public MethodArgs(Type returnType, Type[] argumentTypes)
+    public MethodArgs(params Type[] types)
     {
-        this.returnType = returnType;
-        this.argumentTypes = argumentTypes;
-    }
-    public MethodArgs(params Type[] argumentTypes)
-    {
-        this.returnType = typeof(void);
-        this.argumentTypes = argumentTypes;
-    }
-    public MethodArgs(MethodInfo source)
-    {
-        this.returnType = source.ReturnType;
-        this.argumentTypes = source.GetParameters().Select((f) => f.ParameterType).ToArray();
+        _types = types;
     }
 
-    public override string ToString()
+    public bool Equals(MethodArgs other)
     {
-        var rett = returnType == null ? "void" : returnType.Name;
-        var args = string.Join(", ", argumentTypes.Select(t => t.Name));
-        return $"{rett} ({args})";
+        if (other == null || _types.Length != other._types.Length)
+        {
+            return false;
+        }
+
+        for (int i = 0; i < _types.Length; i++)
+        {
+            if (_types[i] != other._types[i])
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public override bool Equals(object obj)
     {
-        if(obj is MethodArgs y)
-        {
-            var x = this;
-            if (x.returnType != y.returnType) return false;
-            if (x.argumentTypes.Length != y.argumentTypes.Length) return false;
-            for (int i = 0; i < x.argumentTypes.Length; i++)
-            {
-                if (x.argumentTypes[i] != y.argumentTypes[i]) return false;
-            }
-            return true;
-        }
-        return base.Equals(obj);
-    }
-    public static bool operator ==(MethodArgs lhs, MethodArgs rhs)
-    {
-        return lhs.Equals(rhs);
-    }
-    public static bool operator !=(MethodArgs lhs, MethodArgs rhs)
-    {
-        return !lhs.Equals(rhs);
+        return Equals(obj as MethodArgs);
     }
 
     public override int GetHashCode()
     {
-        unchecked // Overflow is fine, just wrap
+        int hash = 17;
+
+        foreach (var argumentType in _types)
         {
-            int hash = 17; // Start with a prime number
-
-            // Combine the hash code of the returnType
-            hash = hash * 23 + (returnType != null ? returnType.GetHashCode() : 0);
-
-            // Combine the hash codes of each argument type in the array
-            if (argumentTypes != null)
-            {
-                foreach (var argType in argumentTypes)
-                {
-                    hash = hash * 23 + (argType != null ? argType.GetHashCode() : 0);
-                }
-            }
-
-            return hash;
+            hash = hash * 23 + (argumentType?.GetHashCode() ?? 0);
         }
+
+        return hash;
     }
 }
 
 
 internal class Helper
 {
-    public static Dictionary<MethodArgs, Type> argumentLookup = new()
+    // Generates a lookup table for all the sync methods in the assembly. The keys of the table
+    // are the parameter types for each method, and the values are the delegates that can be
+    // used to invoke those methods.
+    public static Dictionary<MethodArgs, Type> GenerateArgumentLookup(IEnumerable<Delegate> delegates)
     {
-        { new(typeof(IButton), typeof(ButtonEventData)), typeof(ButtonEventHandler) }, // used literally everywhere lol
-        { new(typeof(bool), new Type[] {typeof(IGrabbable), typeof(Grabber) }), typeof(GrabCheck) }, // Used in Grabbable.UserRootGrabCheck
-        //{ new(typeof(bool), new Type[] {} ), typeof(Func<bool>) }, // Used in SlotInspector.IsTargetEmpty
-        //{ new(typeof(TextEditor)), typeof(Action<TextEditor>) }, // Used in FieldEditor.EditingFinished, FieldEditor.EditingChanged, FieldEditor.EditingStarted
-        { new(typeof(ITouchable), typeof(TouchEventInfo).MakeByRefType()), typeof(TouchEvent) },
-        { new(typeof(ITouchable), new Type[] {typeof(RelayTouchSource), typeof(float3).MakeByRefType(), typeof(float3).MakeByRefType(), typeof(float3).MakeByRefType(), typeof(bool).MakeByRefType()}), typeof(TouchableGetter) },
-        { new(typeof(SlotGizmo), typeof(SlotGizmo)), typeof(SlotGizmo.SlotGizmoReplacement) },
-        { new(typeof(WorldItem)), typeof(WorldItemAction) },
-        //{ new(typeof(void), new Type[] {}), typeof(Action) }, // Used in WorldCloseDialog.Close 
-        // Action<LocomotionController> // used in somewhere?
+        var argumentLookup = new Dictionary<MethodArgs, Type>();
 
-    };
-
-    public static Type ClassifyDelegate(MethodInfo m)
-    {
-        if (argumentLookup.TryGetValue(new(m), out var t))
+        foreach (var del in delegates)
         {
-            return t;
-        }
-        var p = m.GetParameters().Select(para => para.ParameterType).ToArray();
-        if (p.Length == 3 && p[0] == typeof(IButton) && p[1] == typeof(ButtonEventData))
-        {
-            return typeof(ButtonEventHandler<>).MakeGenericType(p[2]);
-        }
-        return GetFuncOrAction(m, p);
+            var methodInfo = del.Method;
+            var parameterTypes = methodInfo.GetParameters().Select(p => p.ParameterType).ToArray();
 
+            // If the method returns void, we need to return an Action<> that matches its parameters.
+            if (methodInfo.ReturnType == typeof(void))
+            {
+                argumentLookup[new MethodArgs(parameterTypes)] = typeof(Action<>).MakeGenericType(parameterTypes);
+            }
+            // Otherwise, we need to return a Func<,> that matches its parameters and return type.
+            else
+            {
+                argumentLookup[new MethodArgs(parameterTypes.Concat(new[] { methodInfo.ReturnType }).ToArray())] = typeof(Func<,>).MakeGenericType(parameterTypes.Concat(new[] { methodInfo.ReturnType }).ToArray());
+            }
+        }
+
+        return argumentLookup;
     }
 
-    public static Type GetFuncOrAction(MethodInfo m)
+    public static Type ClassifyDelegate(MethodInfo methodInfo, Dictionary<MethodArgs, Type> argumentLookup)
     {
-        var p = m.GetParameters().Select(para => para.ParameterType).ToArray();
-        return GetFuncOrAction(m, p);
+        // If the method is a known delegate type, return that type.
+        if (argumentLookup.TryGetValue(new MethodArgs(methodInfo.GetParameters().Select(p => p.ParameterType).ToArray()), out var type))
+        {
+            return type;
+        }
+
+        // If the method has three parameters, and the first two are IButton and ButtonEventData,
+        // return ButtonEventHandler<T>, where T is the third parameter type.
+        var parameters = methodInfo.GetParameters();
+        if (parameters.Length == 3 &&
+            parameters[0].ParameterType == typeof(IButton) &&
+            parameters[1].ParameterType == typeof(ButtonEventData))
+        {
+            return typeof(ButtonEventHandler<>).MakeGenericType(parameters[2].ParameterType);
+        }
+
+        // Otherwise, infer the delegate type from the method's return type, if any.
+        return GetFuncOrAction(methodInfo);
     }
 
-    public static Type GetFuncOrAction(MethodInfo m, Type[] p)
+    public static Type GetFuncOrAction(MethodInfo methodInfo)
     {
-        if (m.ReturnType == typeof(void))
-        {
-            return Expression.GetActionType(p);
-        }
-        else
-        {
-            p = p.Concat(new[] { m.ReturnType }).ToArray();
-            return Expression.GetFuncType(p);
-        }
+        // Get the parameter types.
+        Type[] parameterTypes = methodInfo.GetParameters().Select(p => p.ParameterType).ToArray();
+
+        // Return the appropriate delegate type based on the method's return type.
+        return methodInfo.ReturnType == typeof(void)
+            ? Expression.GetActionType(parameterTypes)
+            : Expression.GetFuncType(parameterTypes.Concat(new[] { methodInfo.ReturnType }).ToArray());
     }
 }

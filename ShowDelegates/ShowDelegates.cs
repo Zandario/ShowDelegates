@@ -129,6 +129,9 @@ namespace ShowDelegates
                     referenceProxySource.Reference.Target = worldElement;
                     break;
                 }
+
+                default:
+                    break;
             }
         }
 
@@ -161,7 +164,7 @@ namespace ShowDelegates
         }
 
         [HarmonyPatch(typeof(ProtoFluxTool), "OnCreateDelegateProxy")]
-        private class FixProtoFluxDeleagtes
+        private class ProtoFluxTool_OnCreateDelegateProxy_Patch
         {
             public static void Prefix(
                 IButton button,
@@ -245,25 +248,12 @@ namespace ShowDelegates
                         return false;
                     }
 
-                    // var myTxt = ui.Text("---- SYNC METHODS HERE ----", true, new Alignment?(Alignment.MiddleCenter), true, null);
-                    // var delegates = ui.VerticalLayout();
-                    // delegates.Slot.ActiveSelf = false;
-                    // delegates.Slot.RemoveComponent(delegates.Slot.GetComponent<LayoutElement>());
-                    // var expander = myTxt.Slot.AttachComponent<Expander>();
-                    // expander.SectionRoot.Target = delegates.Slot;
-                    // expander.IsExpanded = config.GetValue(KEY_DEFAULT_OPEN);
-                    // var colorDriver = myTxt.Slot.AttachComponent<Button>().ColorDrivers.Add();
-                    // colorDriver.ColorDrive.Target = myTxt.Color;
-                    // RadiantUI_Constants.SetupLabelDriverColors(colorDriver);
-
                     RadiantUI_Constants.SetupDefaultStyle(ui);
                     VerticalLayout root = ui.VerticalLayout(4f);
                     root.Slot.Name = "Delegates";
                     _ = root.Slot.RemoveComponent(root.Slot.GetComponent<LayoutElement>());
 
-                    RectTransform header;
-                    RectTransform content;
-                    ui.VerticalHeader(58f, out header, out content);
+                    ui.VerticalHeader(58f, out RectTransform header, out RectTransform content);
                     ui.NestInto(header);
 
                     // The header button that opens the list
@@ -282,7 +272,7 @@ namespace ShowDelegates
                     // Content Section
                     ui.NestInto(content);
                     ui.LayoutTarget = content.Slot;
-                    ui.VerticalLayout(4f);
+                    _ = ui.VerticalLayout(4f);
                     content.Slot.ActiveSelf = false;
                     _ = content.Slot.RemoveComponent(content.Slot.GetComponent<LayoutElement>());
 
@@ -312,7 +302,7 @@ namespace ShowDelegates
                                     $"Critical miss. Please report this message to the mod author: Could not identify {info.method} on type {info.method.DeclaringType}"
                                 );
                                 _ = ui.Text(
-                                    $"<color=orange>{delegateInfo.Name}</color>",
+                                    $"<b>Failed to make:</b> <color=orange>{delegateInfo.Name}</color>",
                                     true,
                                     Alignment.MiddleLeft
                                 );
